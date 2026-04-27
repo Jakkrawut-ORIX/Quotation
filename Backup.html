@@ -997,29 +997,66 @@ function solveFlatFromIRR(){
 }
 
 function goalSeekDown(){
-  var target=getVal('targetMonthlyInc');
-  if(!(target>0)){showToast('กรุณากรอกค่างวดเป้าหมาย','error');return;}
-  var inp=readInputs();
-  var net=inp.net,balloonBaht=inp.balloonBaht,years=inp.years,months=inp.months,flatRate=inp.flatRate;
-  if(months<=0){showToast('กรุณากำหนดระยะเวลา','error');return;}
-  var denom=1+flatRate*years;
-  var downExact=net-balloonBaht-(target*months/denom);
-  downExact=Math.max(0,Math.min(downExact,net));
-  setVal('downType','amount');setVal('downInput',String(Math.round(downExact)));recalc();
-  var slope=-denom/months;var downNow=Math.round(downExact);
-  function currentPmt(){var i=readInputs();return i.finMinusBalloon>0&&i.months>0?Math.ceil((i.finMinusBalloon*(1+i.flatRate*i.years))/i.months):0;}
-  for(var n=0;n<30;n++){
-    var p=currentPmt();if(p===target)break;
-    var diff=p-target,step=Math.round(diff/slope);
-    if(!isFinite(step)||step===0)step=diff>0?1:-1;
-    step=Math.sign(step)*Math.min(Math.abs(step),20);
-    downNow=Math.max(0,Math.min(downNow+step,Math.round(net)));
-    setVal('downInput',String(downNow));recalc();
+  var target = getVal('targetMonthlyInc');
+  if(!(target > 0)){
+    showToast('กรุณากรอกค่างวดเป้าหมาย','error');
+    return;
   }
-  var fp=currentPmt(),match=fp===target;
-  showToast(match?'✅ เงินดาวน์ '+downNow.toLocaleString('th-TH')+' บาท → ค่างวด '+fp.toLocaleString('th-TH')+' บาท':'⚠ ใกล้เคียง: ดาวน์ '+downNow.toLocaleString('th-TH')+' → '+fp.toLocaleString('th-TH'),match?'success':'error');
-}
 
+  var base = readInputs();
+  if(base.months <= 0){
+    showToast('กรุณากำหนดระยะเวลา','error');
+    return;
+  }
+
+  // ค่างวดต้อง "คำนวณ+ปัด" ให้ตรงกับ recalc() เป๊ะๆ
+  function pmtFromDown(down){
+    setVal('downType','amount');
+    setVal('downInput', String(Math.round(down)));
+
+    var i = readInputs();
+    if(i.finMinusBalloon <= 0 || i.months <= 0) return 0;
+
+    var pmtInc = (i.finMinusBalloon * (1 + i.flatRate * i.years)) / i.months;
+
+    // ตรงกับ recalc(): ceil(round(...,2))
+    return Math.ceil(Math.round(pmtInc * 100) / 100);
+  }
+
+  // ช่วงค้นหา: 0..net (balloon ปิด => ไม่ต้องปรับช่วงอื่น)
+  var lo = 0;
+  var hi = base.net;        // net = gross - discount + optionPlus
+  var best = 0;
+
+  for(let k = 0; k < 40; k++){
+    let mid = Math.floor((lo + hi) / 2);
+    let p = pmtFromDown(mid);
+
+    if(p === target){ best = mid; break; }
+
+    // ถ้าค่างวดมากไป → ต้อง "เพิ่มดาวน์"
+    if(p > target){
+      lo = mid + 1;
+      best = mid;
+    } else {
+      hi = mid - 1;
+      best = mid;
+    }
+  }
+
+  setVal('downType','amount');
+  setVal('downInput', String(best));
+  recalc();
+
+  var finalP = pmtFromDown(best);
+  showToast(
+    finalP === target
+      ? `✅ เงินดาวน์ ${best.toLocaleString('th-TH')} บาท → ค่างวด ${finalP.toLocaleString('th-TH')} บาท`
+      : `⚠ ใกล้เคียง: ดาวน์ ${best.toLocaleString('th-TH')} → ${finalP.toLocaleString('th-TH')}`
+    ,
+    finalP === target ? 'success' : 'error'
+  );
+}
 function resetAll(){
   Object.entries(DEFAULT_VALUES).forEach(([k,v])=>setVal(k,v));
   $('guar_none').checked=true;$('guar_personal').checked=false;$('guar_corporate').checked=false;
